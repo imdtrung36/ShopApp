@@ -131,6 +131,8 @@ export default function App() {
       "Giá ↓": "price-desc",
       "Tên A-Z": "name-asc",
       "Tên Z-A": "name-desc",
+      "Loại A-Z": "category-asc",
+      "Loại Z-A": "category-desc",
     }[sort] || sort);
 
     // SORT – giá và tên (không dấu)
@@ -140,6 +142,8 @@ export default function App() {
     const viCmp = (x = "", y = "") => x.localeCompare(y, "vi", { sensitivity: "base" });
     if (sortKey === "name-asc") list.sort((a, b) => viCmp(a.name, b.name));
     if (sortKey === "name-desc") list.sort((a, b) => viCmp(b.name, a.name));
+    if (sortKey === "category-asc") list.sort((a, b) => viCmp(a.category || "", b.category || ""));
+    if (sortKey === "category-desc") list.sort((a, b) => viCmp(b.category || "", a.category || ""));
 
 
     return list;
