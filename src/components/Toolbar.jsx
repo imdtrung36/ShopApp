@@ -80,6 +80,8 @@ export default function Toolbar({
         <option value="price-desc">Giá ↓</option>
         <option value="name-asc">Tên A→Z</option>
         <option value="name-desc">Tên Z→A</option>
+        <option value="category-asc">Loại A→Z</option>
+        <option value="category-desc">Loại Z→A</option>
       </select>
 
       {/* Clear filters */}
