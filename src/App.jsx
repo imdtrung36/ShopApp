@@ -14,26 +14,26 @@ import Checkout from "./pages/Checkout";
 import useDebouncedValue from "./hooks/useDebouncedValue";
 import "./styles/App.css";
 
-// ===== Helpers =====
-const LS_KEY = "cart_v1";
-const safeParse = (raw) => { try { const d = JSON.parse(raw); return Array.isArray(d) ? d : []; } catch { return []; } };
+// ---- Cart Controller (localStorage) ----
+import {
+  getCartFromStorage,
+  saveCartToStorage,
+  addToCart,
+  increaseQty,
+  decreaseQty,
+  removeFromCart,
+  clearCart,
+} from "./controllers/cartController";
 
-// Chuẩn hoá text để search không phân biệt dấu/hoa thường
+// helper: bỏ dấu để so sánh tên không phân biệt dấu
 const norm = (s = "") =>
-  s
-    .toString()
-    .toLowerCase()
-    .normalize("NFD")
+  s.toString().toLowerCase().normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .trim();
 
-// Ép giá về number (nếu API trả string)
-const num = (v) => {
-  if (typeof v === "number") return v;
-  if (!v) return 0;
-  return Number(String(v).replace(/[^\d.-]/g, "")) || 0;
-};
+// helper: ép price về number an toàn
+const num = (v) => (typeof v === "number" ? v : Number(String(v || 0).replace(/[^\d.-]/g, "")) || 0);
 
 // ===== Hook filters + đồng bộ URL =====
 function useFiltersWithURL() {
@@ -48,10 +48,8 @@ function useFiltersWithURL() {
 
   const debSearch = useDebouncedValue(search, 300);
 
-  // Mỗi khi đổi tiêu chí, về trang 1
   useEffect(() => { setPage(1); }, [search, category, minPrice, maxPrice, sort]);
 
-  // Ghi ngược ra URL
   useEffect(() => {
     const params = new URLSearchParams();
     if (debSearch) params.set("q", debSearch);
@@ -75,76 +73,59 @@ function useFiltersWithURL() {
 
 // ===== App =====
 export default function App() {
-  // Cart
-  const [cart, setCart] = useState(() => safeParse(localStorage.getItem(LS_KEY)));
+  // Cart (dùng controller)
+  const [cart, setCart] = useState(() => getCartFromStorage());
   const [showCart, setShowCart] = useState(false);
+
+  // Đồng bộ cart vào localStorage mỗi khi thay đổi
+  useEffect(() => {
+    saveCartToStorage(cart);
+  }, [cart]);
+
+  // Các hàm thao tác cart
+  const AddToCart = (product) => setCart((prev) => addToCart(prev, product));
+  const Inc = (id) => setCart((prev) => increaseQty(prev, id));
+  const Dec = (id) => setCart((prev) => decreaseQty(prev, id));
+  const Remove = (id) => setCart((prev) => removeFromCart(prev, id));
+  const Clear = () => setCart(clearCart());
+
+  const totalQty = cart.reduce((sum, item) => sum + (item.qty || 0), 0);
 
   // Products từ API
   const [productsData, setProductsData] = useState([]);
 
-  // Fetch dữ liệu sản phẩm (khuyên dùng proxy Vite: axios.get('/api/products'))
   useEffect(() => {
     axios.get("/api/products")
-      .then(res => setProductsData(res.data))
-      .catch(err => console.error("Fetch products error:", err));
+      .then((res) => setProductsData(res.data))
+      .catch((err) => console.error("Fetch products error:", err));
   }, []);
 
-  // Đồng bộ cart với localStorage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) setCart(JSON.parse(raw));
-    } catch { }
-  }, []);
-  useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify(cart));
-  }, [cart]);
-
-  // Cart helpers
-  const AddToCart = (product) => {
-    setCart((prev) => {
-      const i = prev.findIndex((p) => p.id === product.id);
-      if (i !== -1) {
-        const next = [...prev];
-        next[i] = { ...next[i], qty: (next[i].qty || 0) + 1 };
-        return next;
-      }
-      return [...prev, { ...product, qty: 1 }];
-    });
-  };
-  const Inc = (id) => setCart((prev) => prev.map((p) => p.id === id ? { ...p, qty: (p.qty || 0) + 1 } : p));
-  const Dec = (id) => setCart((prev) => prev
-    .map((p) => p.id === id ? { ...p, qty: (p.qty || 0) - 1 } : p)
-    .filter((p) => (p.qty || 0) > 0)
-  );
-  const Remove = (id) => setCart((prev) => prev.filter((p) => p.id !== id));
-  const Clear = () => setCart([]);
-  const totalQty = cart.reduce((s, i) => s + (i.qty ?? 0), 0);
 
   // Filters + URL
   const filters = useFiltersWithURL();
   const { search, category, minPrice, maxPrice, sort, page } = filters;
 
   // Lọc + sort + khoảng giá
+  // 
   const filteredProducts = useMemo(() => {
     let list = [...productsData];
 
-    // Search theo tên (không phân biệt dấu)
+    // Search theo tên (không dấu)
     if (search.trim()) {
       const q = norm(search);
-      list = list.filter((p) => norm(p.name).includes(q));
+      list = list.filter(p => norm(p.name).includes(q));
     }
 
     // Category
     const cat = (category || "").toLowerCase();
-    if (cat) list = list.filter((p) => (p.category || "").toLowerCase() === cat);
+    if (cat) list = list.filter(p => (p.category || "").toLowerCase() === cat);
 
     // Price range
     const min = Number(minPrice) || 0;
     const max = Number(maxPrice) || Infinity;
-    list = list.filter((p) => num(p.price) >= min && num(p.price) <= max);
+    list = list.filter(p => num(p.price) >= min && num(p.price) <= max);
 
-    // Sort key (nếu Toolbar dùng label TV thì map về key chuẩn ở đây)
+    // Map sort label nếu lỡ truyền nhãn TV
     const sortKey = ({
       "Giá ↑": "price-asc",
       "Giá ↓": "price-desc",
@@ -152,21 +133,22 @@ export default function App() {
       "Tên Z-A": "name-desc",
     }[sort] || sort);
 
-    // Sort
+    // SORT – giá và tên (không dấu)
     if (sortKey === "price-asc") list.sort((a, b) => num(a.price) - num(b.price));
     if (sortKey === "price-desc") list.sort((a, b) => num(b.price) - num(a.price));
-    if (sortKey === "name-asc") list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    if (sortKey === "name-desc") list.sort((a, b) => String(b.name).localeCompare(String(a.name)));
+    
+    const viCmp = (x = "", y = "") => x.localeCompare(y, "vi", { sensitivity: "base" });
+    if (sortKey === "name-asc") list.sort((a, b) => viCmp(a.name, b.name));
+    if (sortKey === "name-desc") list.sort((a, b) => viCmp(b.name, a.name));
+
 
     return list;
   }, [productsData, search, category, minPrice, maxPrice, sort]);
 
-  // Lấy danh mục động từ dữ liệu
+  // Lấy danh mục động
   const categories = useMemo(() => {
-    const set = new Set(
-      productsData.map(p => String(p.category || "").trim())
-    );
-    return Array.from(set).filter(Boolean); // ["Áo","Quần","Giày"] hoặc bất kỳ
+    const set = new Set(productsData.map((p) => String(p.category || "").trim()));
+    return Array.from(set).filter(Boolean);
   }, [productsData]);
 
   // Phân trang
@@ -184,7 +166,6 @@ export default function App() {
     <div>
       <Header cartCount={totalQty} onCartClick={() => setShowCart(true)} />
 
-      {/* MiniCart overlay */}
       {showCart && (
         <MiniCart
           cart={cart}
@@ -200,8 +181,7 @@ export default function App() {
           path="/"
           element={
             <Home products={pageSlice} onAddToCart={AddToCart}>
-              {/* Toolbar + Pagination đặt ở phần children của Home */}
-              <Toolbar {...filters} categories={categories}/>
+              <Toolbar {...filters} categories={categories} />
               <div
                 style={{
                   display: "flex",
@@ -212,7 +192,14 @@ export default function App() {
                 }}
               >
                 <button
-                  style={{ padding: "6px 12px", borderRadius: 20, background: "#1976d2", color: "#fff", border: "none", opacity: currentPage === 1 ? 0.6 : 1 }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 20,
+                    background: "#1976d2",
+                    color: "#fff",
+                    border: "none",
+                    opacity: currentPage === 1 ? 0.6 : 1,
+                  }}
                   disabled={currentPage === 1}
                   onClick={() => filters.setPage(currentPage - 1)}
                 >
@@ -220,7 +207,14 @@ export default function App() {
                 </button>
                 <span>Trang {currentPage}/{totalPages}</span>
                 <button
-                  style={{ padding: "6px 12px", borderRadius: 20, background: "#1976d2", color: "#fff", border: "none", opacity: currentPage === totalPages ? 0.6 : 1 }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 20,
+                    background: "#1976d2",
+                    color: "#fff",
+                    border: "none",
+                    opacity: currentPage === totalPages ? 0.6 : 1,
+                  }}
                   disabled={currentPage === totalPages}
                   onClick={() => filters.setPage(currentPage + 1)}
                 >
